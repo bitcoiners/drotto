@@ -5,11 +5,14 @@ require 'yaml'
 
 Bundler.require
 
+defined? Thread.report_on_exception and Thread.report_on_exception = true
+
 module DrOtto
   require 'drotto/version'
   require 'drotto/chain'
   require 'drotto/bounce_job'
   require 'drotto/usage_job'
+  require 'drotto/audit_bidder_job'
   
   include Chain
   
@@ -45,6 +48,12 @@ module DrOtto
       loop do
         begin
           api.get_blocks(starting_block..block_num) do |block, number|
+            unless defined? block.transaction_ids
+              # Happens on Golos, see: https://github.com/GolosChain/golos/issues/281
+              error "Blockchain does not provide transaction ids in blocks, giving up."
+              return -1
+            end
+              
             starting_block = number
             timestamp = block.timestamp
             block.transactions.each_with_index do |tx, index|
@@ -91,19 +100,20 @@ module DrOtto
       from = op.from
       to = op.to
       amount = op.amount
-      memo = op.memo
+      memo = op.memo.strip
       
       next unless to == account_name
       
       author, permlink = parse_slug(memo) rescue [nil, nil]
       next if author.nil? || permlink.nil?
+      permlink = normalize_permlink permlink
       comment = find_comment(author, permlink)
       next if comment.nil?
       
       next unless can_vote?(comment)
       next if too_old?(comment)
       next if voted?(comment)
-      next unless amount =~ / #{minimum_bid_asset}$/
+      next unless accepted_asset?(amount)
       next if amount.split(' ').first.to_f < minimum_bid_amount
       next if job.bounced?(id)
       
@@ -117,6 +127,12 @@ module DrOtto
         info "Bid from #{from} for #{amount}."
       end
       
+      invert_vote_weight = if flag_prefix.nil?
+        false
+      else
+        memo =~ /^#{flag_prefix}.*/
+      end
+      
       bids << {
         from: from,
         author: author,
@@ -125,6 +141,7 @@ module DrOtto
         parent_author: comment.parent_author,
         amount: amount,
         timestamp: timestamp,
+        invert_vote_weight: invert_vote_weight,
         trx_id: id
       }
     end
@@ -177,21 +194,40 @@ module DrOtto
   def run
     loop do
       if current_voting_power < 100.0
-        sleep 60
-        redo
-      end
+          sleep 60
+          redo
+        end
       
       offset = (base_block_span * 2.10).to_i
       elapsed = find_bids(offset)
-      join_threads
+      
+      if elapsed == -1
+        sleep 60
+      else
+        join_threads
+      end
     end
   end
   
   def state
-    current_voting_power
+    error_state = 0
+    
+    begin
+      error_state = -1 if current_voting_power == 100.0
+    rescue => e
+      error "Unable to check current state: #{e}", backtrace: e.backtrace
+      
+      error_state = -2
+    ensure
+      exit(error_state)
+    end
   end
   
   def usage(options = {})
     UsageJob.new.perform(options)
+  end
+  
+  def audit_bidder(options = {})
+    AuditBidderJob.new.perform(options)
   end
 end

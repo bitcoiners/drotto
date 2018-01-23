@@ -12,8 +12,20 @@ module DrOtto
       default_value(:drotto_account_name) || config[:drotto][:account_name]
     end
     
+    def voter_account_name
+      default_value(:drotto_voter_account_name) || config[:drotto][:voter_account_name] || account_name
+    end
+    
+    def voting_power_account_name
+      default_value(:drotto_voting_power_account_name) || config[:drotto][:voting_power_account_name] || voter_account_name
+    end
+    
     def posting_wif
       default_value(:drotto_posting_wif) || config[:drotto][:posting_wif]
+    end
+    
+    def voting_wif
+      default_value(:drotto_voting_wif) || config[:drotto][:voting_wif] || posting_wif
     end
     
     def active_wif
@@ -28,8 +40,16 @@ module DrOtto
       ((default_value(:drotto_min_effective_weight) || config[:drotto][:min_effective_weight]).to_f * 100).to_i
     end
     
+    def max_effective_weight
+      ((default_value(:drotto_max_effective_weight) || config[:drotto][:max_effective_weight]).to_f * 100).to_i
+    end
+    
     def batch_vote_weight
       (default_value(:drotto_batch_vote_weight) || (config[:drotto][:batch_vote_weight]).to_f * 100).to_i
+    end
+    
+    def flag_prefix
+      default_value(:flag_prefix) || config[:drotto][:flag_prefix]
     end
     
     def reserve_vote_weight
@@ -46,6 +66,10 @@ module DrOtto
     
     def minimum_bid_asset
       minimum_bid.split(' ').last
+    end
+    
+    def alternative_assets
+      (default_value(:drotto_alternative_assets) || config[:drotto][:alternative_assets] || '').split(' ')
     end
     
     def allow_comment_bids
